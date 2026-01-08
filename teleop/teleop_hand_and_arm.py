@@ -12,12 +12,10 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
+from unitree_sdk2py.core.channel import ChannelFactoryInitialize # dds 
 from televuer import TeleVuerWrapper
 from teleop.robot_control.robot_arm import G1_29_ArmController, G1_23_ArmController, H1_2_ArmController, H1_ArmController
 from teleop.robot_control.robot_arm_ik import G1_29_ArmIK, G1_23_ArmIK, H1_2_ArmIK, H1_ArmIK
-from teleop.robot_control.robot_hand_unitree import Dex3_1_Controller, Dex1_1_Gripper_Controller
-from teleop.robot_control.robot_hand_inspire import Inspire_Controller_DFX, Inspire_Controller_FTP
-from teleop.robot_control.robot_hand_brainco import Brainco_Controller
 from teleimager.image_client import ImageClient
 from teleop.utils.episode_writer import EpisodeWriter
 from teleop.utils.ipc import IPC_Server
@@ -81,6 +79,7 @@ if __name__ == '__main__':
     parser.add_argument('--arm', type=str, choices=['G1_29', 'G1_23', 'H1_2', 'H1'], default='G1_29', help='Select arm controller')
     parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire_ftp', 'inspire_dfx', 'brainco'], help='Select end effector controller')
     parser.add_argument('--img-server-ip', type=str, default='192.168.123.164', help='IP address of image server, used by teleimager and televuer')
+    parser.add_argument('--network-interface', type=str, default=None, help='Network interface for dds communication, e.g., eth0, wlan0. If None, use default interface.')
     # mode flags
     parser.add_argument('--motion', action = 'store_true', help = 'Enable motion control mode')
     parser.add_argument('--headless', action='store_true', help='Enable headless mode (no display)')
@@ -99,6 +98,12 @@ if __name__ == '__main__':
     logger_mp.info(f"args: {args}")
 
     try:
+        # setup dds communication domains id
+        if args.sim:
+            ChannelFactoryInitialize(1, networkInterface=args.network_interface)
+        else:
+            ChannelFactoryInitialize(0, networkInterface=args.network_interface)
+
         # ipc communication mode. client usage: see utils/ipc.py
         if args.ipc:
             ipc_server = IPC_Server(on_press=on_press,get_state=get_state)
@@ -154,6 +159,7 @@ if __name__ == '__main__':
 
         # end-effector
         if args.ee == "dex3":
+            from teleop.robot_control.robot_hand_unitree import Dex3_1_Controller
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
             right_hand_pos_array = Array('d', 75, lock = True)     # [input]
             dual_hand_data_lock = Lock()
@@ -162,6 +168,7 @@ if __name__ == '__main__':
             hand_ctrl = Dex3_1_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, 
                                           dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
         elif args.ee == "dex1":
+            from teleop.robot_control.robot_hand_unitree import Dex1_1_Gripper_Controller
             left_gripper_value = Value('d', 0.0, lock=True)        # [input]
             right_gripper_value = Value('d', 0.0, lock=True)       # [input]
             dual_gripper_data_lock = Lock()
@@ -170,6 +177,7 @@ if __name__ == '__main__':
             gripper_ctrl = Dex1_1_Gripper_Controller(left_gripper_value, right_gripper_value, dual_gripper_data_lock, 
                                                      dual_gripper_state_array, dual_gripper_action_array, simulation_mode=args.sim)
         elif args.ee == "inspire_dfx":
+            from teleop.robot_control.robot_hand_inspire import Inspire_Controller_DFX
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
             right_hand_pos_array = Array('d', 75, lock = True)     # [input]
             dual_hand_data_lock = Lock()
@@ -177,6 +185,7 @@ if __name__ == '__main__':
             dual_hand_action_array = Array('d', 12, lock = False)  # [output] current left, right hand action(12) data.
             hand_ctrl = Inspire_Controller_DFX(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
         elif args.ee == "inspire_ftp":
+            from teleop.robot_control.robot_hand_inspire import Inspire_Controller_FTP
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
             right_hand_pos_array = Array('d', 75, lock = True)     # [input]
             dual_hand_data_lock = Lock()
@@ -184,6 +193,7 @@ if __name__ == '__main__':
             dual_hand_action_array = Array('d', 12, lock = False)  # [output] current left, right hand action(12) data.
             hand_ctrl = Inspire_Controller_FTP(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
         elif args.ee == "brainco":
+            from teleop.robot_control.robot_hand_brainco import Brainco_Controller
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
             right_hand_pos_array = Array('d', 75, lock = True)     # [input]
             dual_hand_data_lock = Lock()
@@ -229,7 +239,14 @@ if __name__ == '__main__':
                                      frequency = args.frequency, 
                                      rerun_log = not args.headless)
 
-        logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
+        logger_mp.info("----------------------------------------------------------------")
+        logger_mp.info("🟢  Press [r] to start syncing the robot with your movements.")
+        if args.record:
+            logger_mp.info("🟡  Press [s] to START or SAVE recording (toggle cycle).")
+        else:
+            logger_mp.info("🔵  Recording is DISABLED (run with --record to enable).")
+        logger_mp.info("🔴  Press [q] to stop and exit the program.")
+        logger_mp.info("⚠️  IMPORTANT: Please keep your distance and stay safe.")
         READY = True                  # now ready to (1) enter START state
         while not START and not STOP: # wait for start or stop signal.
             time.sleep(0.033)
@@ -237,7 +254,7 @@ if __name__ == '__main__':
                 head_img, _ = img_client.get_head_frame()
                 tv_wrapper.render_to_xr(head_img)
 
-        logger_mp.info("---------------------🚀start program🚀-------------------------")
+        logger_mp.info("---------------------🚀start Tracking🚀-------------------------")
         arm_ctrl.speed_gradual_max()
         # main loop. robot start to follow VR user's motion
         while not STOP:
@@ -462,7 +479,10 @@ if __name__ == '__main__':
             logger_mp.debug(f"main process sleep: {sleep_time}")
 
     except KeyboardInterrupt:
-        logger_mp.info("KeyboardInterrupt, exiting program...")
+        logger_mp.info("⛔ KeyboardInterrupt, exiting program...")
+    except Exception:
+        import traceback
+        logger_mp.error(traceback.format_exc())
     finally:
         try:
             arm_ctrl.ctrl_dual_arm_go_home()
@@ -490,8 +510,9 @@ if __name__ == '__main__':
 
         try:
             if not args.motion:
-                status, result = motion_switcher.Exit_Debug_Mode()
-                logger_mp.info(f"Exit debug mode: {'Success' if status == 3104 else 'Failed'}")
+                pass
+                # status, result = motion_switcher.Exit_Debug_Mode()
+                # logger_mp.info(f"Exit debug mode: {'Success' if status == 3104 else 'Failed'}")
         except Exception as e:
             logger_mp.error(f"Failed to exit debug mode: {e}")
 
@@ -506,5 +527,5 @@ if __name__ == '__main__':
                 recorder.close()
         except Exception as e:
             logger_mp.error(f"Failed to close recorder: {e}")
-        logger_mp.info("Finally, exiting program.")
+        logger_mp.info("✅ Finally, exiting program.")
         exit(0)
